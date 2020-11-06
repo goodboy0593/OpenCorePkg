@@ -26,6 +26,7 @@ WITHOUT WARRANTIES OR REPRESENTATIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED.
 #include <Library/MemoryAllocationLib.h>
 #include <Library/OcDevicePathLib.h>
 #include <Library/OcFileLib.h>
+#include <Library/OcStringLib.h>
 #include <Library/UefiBootServicesTableLib.h>
 #include <Library/UefiRuntimeServicesTableLib.h>
 #include <Library/UefiApplicationEntryPoint.h>
@@ -34,20 +35,58 @@ STATIC
 EFI_STATUS
 LoadOpenCore (
   IN  EFI_SIMPLE_FILE_SYSTEM_PROTOCOL  *FileSystem,
+  IN  EFI_DEVICE_PATH_PROTOCOL         *LoaderDevicePath,
   IN  EFI_HANDLE                       ParentImageHandle,
   OUT EFI_HANDLE                       *ImageHandle
   )
 {
   EFI_STATUS                 Status;
   VOID                       *Buffer;
+  UINTN                      LoaderPathSize;
+  UINTN                      RootPathSize;
+  CHAR16                     *LoaderPath;
   UINT32                     BufferSize;
 
   ASSERT (FileSystem != NULL);
   ASSERT (ParentImageHandle != NULL);
   ASSERT (ImageHandle != NULL);
 
+  Buffer = NULL;
   BufferSize = 0;
-  Buffer = ReadFile (FileSystem, OPEN_CORE_DRIVER_PATH, &BufferSize, BASE_16MB);
+
+  LoaderPath = OcCopyDevicePathFullName (LoaderDevicePath);
+  LoaderPathSize = StrSize (LoaderPath);
+
+  //
+  // Try relative path: EFI\\XXX\\Bootstrap\\Bootstrap.efi -> EFI\\XXX\\OpenCore.efi
+  //
+  if (LoaderPath != NULL) {
+    if (UnicodeGetParentDirectory (LoaderPath)
+      && UnicodeGetParentDirectory (LoaderPath)) {
+      RootPathSize = LoaderPathSize - StrSize (LoaderPath);
+
+      if (RootPathSize >= L_STR_SIZE (OPEN_CORE_DRIVER_PATH)) {
+        LoaderPath[RootPathSize] = '\\';
+        CopyMem (&LoaderPath[RootPathSize + 1], OPEN_CORE_DRIVER_PATH, L_STR_SIZE (OPEN_CORE_DRIVER_PATH));
+        Buffer = ReadFile (FileSystem, LoaderPath, &BufferSize, BASE_16MB);
+      }
+    }
+
+    FreePool (LoaderPath);
+  }
+
+  //
+  // Try absolute path: EFI\\BOOT\\BOOTx64.efi -> EFI\\OC\\OpenCore.efi
+  //
+  if (Buffer == NULL) {
+    Buffer = ReadFile (
+      FileSystem,
+      OPEN_CORE_ROOT_PATH L"\\" OPEN_CORE_DRIVER_PATH,
+      &BufferSize,
+      BASE_16MB
+      );
+  }
+
   if (Buffer == NULL) {
     DEBUG ((DEBUG_ERROR, "BS: Failed to locate valid OpenCore image - %p!\n", Buffer));
     return EFI_NOT_FOUND;
@@ -195,7 +234,7 @@ UefiMain (
   }
 
   DEBUG ((DEBUG_INFO, "BS: Trying to load OpenCore image...\n"));
-  Status = LoadOpenCore (FileSystem, ImageHandle, &OcImageHandle);
+  Status = LoadOpenCore (FileSystem, LoadedImage->FilePath, ImageHandle, &OcImageHandle);
   if (EFI_ERROR (Status)) {
     DEBUG ((DEBUG_WARN, "BS: Failed to load OpenCore from disk - %r\n", Status));
     return EFI_NOT_FOUND;

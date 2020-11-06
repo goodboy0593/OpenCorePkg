@@ -65,6 +65,10 @@ EFI_HANDLE
 mLoadHandle;
 
 STATIC
+CHAR16 *
+mRootPath;
+
+STATIC
 EFI_STATUS
 EFIAPI
 OcStartImage (
@@ -120,7 +124,7 @@ OcMain (
   DEBUG ((DEBUG_INFO, "OC: OcLoadNvramSupport...\n"));
   OcLoadNvramSupport (Storage, &mOpenCoreConfiguration);
   DEBUG ((DEBUG_INFO, "OC: OcMiscMiddleInit...\n"));
-  OcMiscMiddleInit (Storage, &mOpenCoreConfiguration, LoadPath, &mLoadHandle);
+  OcMiscMiddleInit (Storage, &mOpenCoreConfiguration, mRootPath, LoadPath, &mLoadHandle);
   DEBUG ((DEBUG_INFO, "OC: OcLoadUefiSupport...\n"));
   OcLoadUefiSupport (Storage, &mOpenCoreConfiguration, &mOpenCoreCpuInfo);
   DEBUG ((DEBUG_INFO, "OC: OcLoadAcpiSupport...\n"));
@@ -175,10 +179,31 @@ OcBootstrapRerun (
   if (This->NestedCount == 1) {
     mOpenCoreVaultKey = OcGetVaultKey (This);
 
+    //
+    // Calculate root path (never freed).
+    //
+    if (LoadPath != NULL) {
+      ASSERT (mRootPath == NULL);
+      mRootPath = OcCopyDevicePathFullName (LoadPath);
+      if (mRootPath != NULL) {
+        if (UnicodeGetParentDirectory (mRootPath)) {
+          DEBUG ((DEBUG_INFO, "OC: Got launch root path %s\n", mRootPath));
+        } else {
+          FreePool (mRootPath);
+          mRootPath = NULL;
+        }
+      }
+    }
+
+    if (mRootPath == NULL) {
+      mRootPath = OPEN_CORE_ROOT_PATH;
+      DEBUG ((DEBUG_INFO, "OC: Got default root path %s\n", mRootPath));
+    }
+
     Status = OcStorageInitFromFs (
       &mOpenCoreStorage,
       FileSystem,
-      OPEN_CORE_ROOT_PATH,
+      mRootPath,
       mOpenCoreVaultKey
       );
 
